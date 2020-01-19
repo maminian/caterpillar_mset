@@ -30,7 +30,7 @@ package. If you have a vector-valued time series
 `Y`, where the data is arranged in columns, 
 the simplest call is 
 
-```import mset
-
+```
+import mset
 anomalies = mset.online_mset(Y)
 ```
