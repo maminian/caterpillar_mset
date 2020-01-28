@@ -9,7 +9,7 @@ The basic algorithm is described in the function
 online_MSET().
 
 Manuchehr Aminian
-Last update: 20 August 2019
+Last update: 28 January 2020
 '''
 
 import numpy as np
@@ -170,7 +170,7 @@ def online_mset(Y, op=otimes2_ij, thresh=0.10, output_norms=False, **kwargs):
 
     The algorithm goes as follows:
         1. Initialization.
-            a. Initialize the estimate for the data mean with the
+            a. Initialize the estimate for the data mean with thef
                 first column of Y.
             b. Initialize the memory/dictionary/list of exemplars
                 "D" with the second column of Y, subtracting the running average.
@@ -293,9 +293,77 @@ def online_mset(Y, op=otimes2_ij, thresh=0.10, output_norms=False, **kwargs):
     #
 #
 
+def fit(Y, op=otimes2_ij, **kwargs):
+    '''
+    Constructs a dictionary with a fixed dataset. 
+    No pruning of dictionary elements is done.
+    Mean centering is done with respect to the entire set of data Y. 
+    
+    DATA IS ASSUMED TO COME IN COLUMNS.
+    '''
+    import numpy as np
+    from scipy import linalg as spla
+    
+    if kwargs.get('debug',False):
+        import pdb
+        pdb.set_trace()
+    #
+    verbosity = kwargs.get('verbosity',0)
+    
+    global _oDD             # storage for precomputed operator (D \otimes D)
+    global _oDD_lufactors   # LU factorization for dictionary
+    global _mu              # current estimate for mean
+    global _D               # storage for dictionary (mean-centered by _mu)
+    
+    d,n = np.shape(Y)
+
+    _mu = np.mean( Y, axis=1 )
+    _mu.shape = (d,1)
+    
+    _D = (Y.T - _mu.T).T
+    
+    _oDD = otimes(_D,_D, op=op)
+    _oDD_lufactors = spla.lu_factor(_oDD)
+    
+    return
+#
+
+def predict(Y, op=otimes2_ij, **kwargs):
+    '''
+    Applied the built MSET model (via .fit()) to a new set of data. 
+    Returns the reconstructed data Yhat.
+    You must choose a threshold criteria to identify anomalies.
+    '''
+    import numpy as np
+    if kwargs.get('debug',False):
+        import pdb
+        pdb.set_trace()
+    #
+    verbosity = kwargs.get('verbosity',0)
+
+    global _oDD     # storage for precomputed operator (D \otimes D)
+    global _mu      # current estimate for mean
+    global _D       # storage for dictionary (mean-centered by _mu)
+    
+    d,m = Y.shape
+    
+#    Yhat = np.array([ np.dot(_D, op_W(_D, y)) for y in Y.T ]).T
+    Yhat = np.array( Y.T - _mu.T ).T
+    for j in range(Yhat.shape[1]):
+        pred = np.dot(_D, op_W(_D, Yhat[:,j].flatten()))
+        pred.shape = (d,1)
+        Yhat[:,[j]] = pred  #column assignment finnicky
+        if verbosity>0:
+            print('MSET predict: data point %i of %i.'%(j+1,Y.shape[1]))
+
+    
+    return Yhat
+#
+
 #########################
 #
 # whole gamut + visualization
+# Specifically for time-delayed embedding problems!
 #
 
 def visualize_mset(x,thresh,delay, verbosity=0):
