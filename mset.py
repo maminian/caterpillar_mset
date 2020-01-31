@@ -352,7 +352,7 @@ def predict(Y, op=otimes2_ij, **kwargs):
     for j in range(Yhat.shape[1]):
         pred = np.dot(_D, op_W(_D, Yhat[:,j].flatten()))
         pred.shape = (d,1)
-        Yhat[:,[j]] = pred  #column assignment finnicky
+        Yhat[:,[j]] = pred + _mu  #column assignment finnicky
         if verbosity>0:
             print('MSET predict: data point %i of %i.'%(j+1,Y.shape[1]))
 
