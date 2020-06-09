@@ -28,6 +28,8 @@ global _oDD_lufactors
 global _mu
 global _mus
 
+global stop_idx
+
 
 _D = np.zeros((0,0))
 _oDD = np.zeros((0,0))
@@ -35,6 +37,8 @@ _oDD_lufactors = None
 
 _mu = np.nan
 _mus = []
+
+stop_idx = None
 
 #
 #########################################################
@@ -163,7 +167,8 @@ def op_W(D,P, op=otimes2_ij):
 #
 
 
-def online_mset(Y, op=otimes2_ij, thresh=0.10, output_norms=False, **kwargs):
+def online_mset(Y, op=otimes2_ij, thresh=0.10, output_norms=False, 
+    mode='full', halt_condition=None, **kwargs):
     '''
     An 'online' version of MSET for a vector-valued
     timeseries Y, arranged by **columns**.
@@ -212,6 +217,22 @@ def online_mset(Y, op=otimes2_ij, thresh=0.10, output_norms=False, **kwargs):
             of thresholds. Computing (anomalies < thresh) returns the
             original output.
             Default: False.
+            
+        mode: string, indicates the training mode. 
+            If 'full', the online MSET algorithm is applied to 
+                the entirety of the sequence Y.
+            If 'halt', the online MSET algorithm is applied to 
+                the sequence Y, but will halt early if more than 
+                halt_condition observations fit within the model.
+                (note this argument must be defined if 'halt').
+            Default: 'full'
+            
+        halt_condition: integer. Goes with training mode 'halt'.
+            Specifies the number of observations required before 
+            halting early. A variable stop_idx is stored so that
+            Y[:,:stop_idx] built the model, and Y[:,stop_idx:] 
+            can be used in evaluating the model with the "predict" function.
+            Default: None
 
         **kwargs:
         debug: boolean. If True, a pdb.set_trace() is executed at the
@@ -226,9 +247,16 @@ def online_mset(Y, op=otimes2_ij, thresh=0.10, output_norms=False, **kwargs):
     #
     verbosity = kwargs.get('verbosity',0)
 
+    # Verify the user has set needed information depending on the mode.
+    assert mode.lower() in ['full', 'halt']
+    if mode=='halt':
+        assert isinstance(halt_condition, int)
+
     global _oDD     # storage for precomputed operator (D \otimes D)
     global _mu      # current estimate for mean
     global _mus     # the history of calculated means; non-essential.
+    if mode=='halt':
+        global stop_idx
 
     d,n = np.shape(Y)
 
@@ -250,6 +278,7 @@ def online_mset(Y, op=otimes2_ij, thresh=0.10, output_norms=False, **kwargs):
     _oDD = otimes(D,D, op=op)
 
     # main loop.
+    consec=0    # tracking consecutive indices without an update.
     for j in range(2,n):
         if verbosity>0: print('Iteration %s : '%str(j).zfill(5), end='')
 
@@ -271,9 +300,20 @@ def online_mset(Y, op=otimes2_ij, thresh=0.10, output_norms=False, **kwargs):
 
         if rel_err < thresh:
             if verbosity>0: print('continuing.')
+            consec += 1
+            if mode=='halt':
+                if consec == halt_condition:
+                    if verbosity>0: 
+                        print('%i consecutive observations without model update; halting.'%consec)
+                    #
+                    stop_idx = j+1
+                    break
+            #
             continue
         else:
             if verbosity>0: print('appending datapoint to memory.')
+            consec = 0
+            
             D = np.hstack( (D, ycurr) )
 
             # update the mean; store a history of previous values.
@@ -286,10 +326,10 @@ def online_mset(Y, op=otimes2_ij, thresh=0.10, output_norms=False, **kwargs):
 
     if output_norms:
         # allow the user to play with thresholding
-        return norms
+        return norms[:j]
     else:
         # apply a thresholding to define anomalies.
-        return (norms >= thresh)
+        return (norms[:j] >= thresh)
     #
 #
 
