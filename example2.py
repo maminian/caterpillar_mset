@@ -33,14 +33,16 @@ delay = int((np.pi/2)/(t[1] - t[0]))
 Y = tde.tde(x, delay=delay)
 
 # train on roughly the first period of the sinusoid.
+ms = mset.MSET()
+
 training = np.arange(4*delay, dtype=int)
 
 print('fitting MSET model to fixed training set')
-mset.fit(Y[:,training])
+ms.fit(Y[:,training])
 
 # predict everything.
 print('predicting with fixed dictionary')
-Yhat = mset.predict(Y, verbosity=1)
+Yhat = ms.predict(Y, verbosity=1)
 
 print('evaluating error and visualizing.')
 err = np.linalg.norm(Y - Yhat, axis=0)

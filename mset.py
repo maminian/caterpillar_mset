@@ -9,7 +9,7 @@ The basic algorithm is described in the function
 online_MSET().
 
 Manuchehr Aminian
-Last update: 28 January 2020
+Last update: 16 June 2020
 '''
 
 import numpy as np
@@ -21,459 +21,456 @@ import scipy
 # of new points. Will be faster than "naive"
 # reconstruction when there are only a few anomalies.
 #
-global _D
-global _oDD
-global _oDD_lufactors
+class MSET:
+    def __init__(self):
+        
+        self._D = np.zeros((0,0))
+        self._oDD = np.zeros((0,0))
+        self._oDD_lufactors = None
 
-global _mu
-global _mus
+        self._mu = np.nan
+        self._mus = []
 
-global stop_idx
+        self.stop_idx = np.nan
 
+        return
+    #
+    
+    def otimes1_ij(self,x,y):
+        '''
+        Similarity operator from the Dreissigmeier paper
 
-_D = np.zeros((0,0))
-_oDD = np.zeros((0,0))
-_oDD_lufactors = None
-
-_mu = np.nan
-_mus = []
-
-stop_idx = None
-
-#
-#########################################################
-#
-
-def otimes1_ij(x,y):
-    '''
-    Similarity operator from the Dreissigmeier paper
-
-    s(x,y) = 1 - (||x||**2 - ||y||**2)/(||x-y||**2)
-    '''
-    import numpy as np
-    return 1. - (np.linalg.norm(x)**2 - np.linalg.norm(y)**2)/(np.linalg.norm(x-y)**2)
-#
-
-def otimes2_ij(x,y):
-    '''
-    Similarity operator from the Wang paper
-
-    s(x,y) = 1 - ||x-y||/(||x|| + ||y||)
-    '''
-    import numpy as np
-
-    if all(x==y):
-        # Handling the case of x and y both being the zero vector.
-        return 1.
-    else:
-        return 1. - np.linalg.norm(x-y)/(np.linalg.norm(x) + np.linalg.norm(y))
-#
-
-def otimes(X,Y, op=otimes2_ij):
-    '''
-    otimes operator on matrices; double loop over the columns of X and Y.
-
-    Note slightly different convention than in the papers; there, X loops
-        over the rows and Y over the columns. Here we strictly
-        keep the column-vector convention.
-    '''
-    m1,n = np.shape(X)
-    m2,p = np.shape(Y)
-
-    if m1!=m2:
-        raise Exception('dimensionality mismatch between X and Y.')
-    else:
-        m = m1
+        s(x,y) = 1 - (||x||**2 - ||y||**2)/(||x-y||**2)
+        '''
+        import numpy as np
+        return 1. - (np.linalg.norm(x)**2 - np.linalg.norm(y)**2)/(np.linalg.norm(x-y)**2)
+    #
+    #
+    #########################################################
     #
 
-    Z = np.zeros( (n,p) )
 
-    for i in range(n):
-        for j in range(p):
-            Z[i,j] = op(X[:,i], Y[:,j])
-    #
-    return Z
-#
+    def otimes2_ij(self,x,y):
+        '''
+        Similarity operator from the Wang paper
 
+        s(x,y) = 1 - ||x-y||/(||x|| + ||y||)
+        '''
+        import numpy as np
 
-def op_W(D,P, op=otimes2_ij):
-    '''
-    Nonlinearly maps the features into the (possibly overcomplete)
-    columns of D based on the operator otimes; roughly,
-
-    W = np.linalg.solve( otimes(D,D) , otimes(D,P) ),
-
-    with the hope that P is well approximated by DW. Note
-    that if the otimes operator is the simple dot product,
-    then DW==P with probability one (excepting degenerate examples)
-    as long as the rank of D is the same as the
-    dimension of the columns of D.
-
-    A rough caching is done if mset.py is treated
-    to accelerate repeated calls to this function;
-    the matrix D and the similarity matrix otimes(D,D)
-    are stored internally, and op_W uses the stored otimes(D,D)
-    if D is the same as the internally stored _D.
-    '''
-    import numpy as np
-    from scipy import linalg as spla
-
-    global _D
-    global _oDD
-    global _oDD_lufactors
-
-    # If D has not changed since the last usage, use
-    # the cached similarity matrix _oDD. Else, recompute
-    # and store.
-    #
-    # TODO: re-implement just using a global flag to track when D is
-    # up to date or out of date.
-    if np.shape(_D)==np.shape(D):
-        if np.linalg.norm(_D - D)/np.linalg.norm(D) < 1e-4:
-            use_cached = True
+        if all(x==y):
+            # Handling the case of x and y both being the zero vector.
+            return 1.
         else:
-            _D = D
+            return 1. - np.linalg.norm(x-y)/(np.linalg.norm(x) + np.linalg.norm(y))
+    #
+
+    def otimes(self,X,Y, op=otimes2_ij):
+        '''
+        otimes operator on matrices; double loop over the columns of X and Y.
+
+        Note slightly different convention than in the papers; there, X loops
+            over the rows and Y over the columns. Here we strictly
+            keep the column-vector convention.
+        '''
+        m1,n = np.shape(X)
+        m2,p = np.shape(Y)
+
+        if m1!=m2:
+            raise Exception('dimensionality mismatch between X and Y.')
+        else:
+            m = m1
+        #
+
+        Z = np.zeros( (n,p) )
+
+        for i in range(n):
+            for j in range(p):
+                Z[i,j] = op(self,X[:,i], Y[:,j])
+        #
+        return Z
+    #
+
+
+    def op_W(self,D,P, op=otimes2_ij):
+        '''
+        Nonlinearly maps the features into the (possibly overcomplete)
+        columns of D based on the operator otimes; roughly,
+
+        W = np.linalg.solve( otimes(D,D) , otimes(D,P) ),
+
+        with the hope that P is well approximated by DW. Note
+        that if the otimes operator is the simple dot product,
+        then DW==P with probability one (excepting degenerate examples)
+        as long as the rank of D is the same as the
+        dimension of the columns of D.
+
+        A rough caching is done if mset.py is treated
+        to accelerate repeated calls to this function;
+        the matrix D and the similarity matrix otimes(D,D)
+        are stored internally, and op_W uses the stored otimes(D,D)
+        if D is the same as the internally stored _D.
+        '''
+        import numpy as np
+        from scipy import linalg as spla
+
+        #global _D
+        #global _oDD
+        #global _oDD_lufactors
+
+        # If D has not changed since the last usage, use
+        # the cached similarity matrix _oDD. Else, recompute
+        # and store.
+        #
+        # TODO: re-implement just using a global flag to track when D is
+        # up to date or out of date.
+        if np.shape(self._D)==np.shape(D):
+            if np.linalg.norm(self._D - D)/np.linalg.norm(D) < 1e-4:
+                use_cached = True
+            else:
+                self._D = D
+                use_cached = False
+        else:
+            self._D = D
             use_cached = False
-    else:
-        _D = D
-        use_cached = False
+        #
+        if not use_cached:
+            # recompute similarity matrix and
+            # its LU factorization to accelerate solves
+            # for future iterations.
+            oDD = self.otimes(D,D, op=op)
+            self._oDD = oDD
+
+            self._oDD_lufactors = spla.lu_factor(oDD)
+        #
+
+        # fix P if it's a one-dimensional array.
+        pshape = np.shape(P)
+        if len(pshape)==1:
+            P.shape = (pshape[0],1)
+        #
+
+        oDP = self.otimes(D,P, op=op)
+
+        # The actual operation.
+        try:
+            W = spla.lu_solve(self._oDD_lufactors, oDP)
+        except:
+            print('LU solver failed; falling back naive solver.')
+            W = np.linalg.solve( self._oDD, oDP )
+        #
+        return W
     #
-    if not use_cached:
-        # recompute similarity matrix and
-        # its LU factorization to accelerate solves
-        # for future iterations.
-        oDD = otimes(D,D, op=op)
-        _oDD = oDD
-
-        _oDD_lufactors = spla.lu_factor(oDD)
-    #
-
-    # fix P if it's a one-dimensional array.
-    pshape = np.shape(P)
-    if len(pshape)==1:
-        P.shape = (pshape[0],1)
-    #
-
-    oDP = otimes(D,P, op=op)
-
-    # The actual operation.
-    try:
-        W = spla.lu_solve(_oDD_lufactors, oDP)
-    except:
-        print('LU solver failed; falling back naive solver.')
-        W = np.linalg.solve( _oDD, oDP )
-    #
-    return W
-#
 
 
-def online_mset(Y, op=otimes2_ij, thresh=0.10, output_norms=False, 
-    mode='full', halt_condition=None, **kwargs):
-    '''
-    An 'online' version of MSET for a vector-valued
-    timeseries Y, arranged by **columns**.
+    def online_mset(self, Y, op=otimes2_ij, thresh=0.10, output_norms=False, 
+        mode='full', halt_condition=None, **kwargs):
+        '''
+        An 'online' version of MSET for a vector-valued
+        timeseries Y, arranged by **columns**.
 
-    The algorithm goes as follows:
-        1. Initialization.
-            a. Initialize the estimate for the data mean with thef
-                first column of Y.
-            b. Initialize the memory/dictionary/list of exemplars
-                "D" with the second column of Y, subtracting the running average.
-        2. For the remaining columns of Y, indexed by j,
-            a. Subtract the estimate for the mean from Y[:,j], call it y.
-            b. Apply the nonlinear mapping of the data onto
-                the basis of D and calculate the prediction, call it yhat.
-            c. If ||yhat - y||/||y|| < thresh,
-                continue; else, append Y[:,j] to D,
-                mark index j as an anomaly, and update the
-                estimate of the mean with a weighted average of the
-                existing mean and the new data point (should be a simple mean
-                of all anomalies to that point).
+        The algorithm goes as follows:
+            1. Initialization.
+                a. Initialize the estimate for the data mean with thef
+                    first column of Y.
+                b. Initialize the memory/dictionary/list of exemplars
+                    "D" with the second column of Y, subtracting the running average.
+            2. For the remaining columns of Y, indexed by j,
+                a. Subtract the estimate for the mean from Y[:,j], call it y.
+                b. Apply the nonlinear mapping of the data onto
+                    the basis of D and calculate the prediction, call it yhat.
+                c. If ||yhat - y||/||y|| < thresh,
+                    continue; else, append Y[:,j] to D,
+                    mark index j as an anomaly, and update the
+                    estimate of the mean with a weighted average of the
+                    existing mean and the new data point (should be a simple mean
+                    of all anomalies to that point).
 
-        3. The output is a binary vector of the same size
-            as np.shape(Y)[1] indicating locations where
-            new dictionary entries were added (understood as anomalies).
+            3. The output is a binary vector of the same size
+                as np.shape(Y)[1] indicating locations where
+                new dictionary entries were added (understood as anomalies).
 
-    Inputs:
-        Y: numpy array, shape (d,n); n vectors in dimension d.
-    Outputs:
-        anomalies: numpy array, shape (n,); True/False
-            vector indicating locations of anomalies; i.e.,
-            updates to the memory/dictionary/exemplars.
-    Optional inputs:
-        *args:
-        op: a function implementing the nonlinear similarity between
-            two vectors, which is the basis for most of the
-            corresponding nonlinear operators on matrices X \otimes Y.
-            Default: otimes2_ij, in the mset.py file.
+        Inputs:
+            Y: numpy array, shape (d,n); n vectors in dimension d.
+        Outputs:
+            anomalies: numpy array, shape (n,); True/False
+                vector indicating locations of anomalies; i.e.,
+                updates to the memory/dictionary/exemplars.
+        Optional inputs:
+            *args:
+            op: a function implementing the nonlinear similarity between
+                two vectors, which is the basis for most of the
+                corresponding nonlinear operators on matrices X \otimes Y.
+                Default: otimes2_ij, in the mset.py file.
 
-        thresh: threshold parameter; if relative error in representing
-            the new datapoint is larger than this, then it is
-            added to the memory.
-            Default: 0.1
+            thresh: threshold parameter; if relative error in representing
+                the new datapoint is larger than this, then it is
+                added to the memory.
+                Default: 0.1
 
-        output_norms: Boolean. If True, then the values of the
-            relative error are output instead of the binary vector
-            of thresholds. Computing (anomalies < thresh) returns the
-            original output.
-            Default: False.
-            
-        mode: string, indicates the training mode. 
-            If 'full', the online MSET algorithm is applied to 
-                the entirety of the sequence Y.
-            If 'halt', the online MSET algorithm is applied to 
-                the sequence Y, but will halt early if more than 
-                halt_condition observations fit within the model.
-                (note this argument must be defined if 'halt').
-            Default: 'full'
-            
-        halt_condition: integer. Goes with training mode 'halt'.
-            Specifies the number of observations required before 
-            halting early. A variable stop_idx is stored so that
-            Y[:,:stop_idx] built the model, and Y[:,stop_idx:] 
-            can be used in evaluating the model with the "predict" function.
-            Default: None
+            output_norms: Boolean. If True, then the values of the
+                relative error are output instead of the binary vector
+                of thresholds. Computing (anomalies < thresh) returns the
+                original output.
+                Default: False.
+                
+            mode: string, indicates the training mode. 
+                If 'full', the online MSET algorithm is applied to 
+                    the entirety of the sequence Y.
+                If 'halt', the online MSET algorithm is applied to 
+                    the sequence Y, but will halt early if more than 
+                    halt_condition observations fit within the model.
+                    (note this argument must be defined if 'halt').
+                Default: 'full'
+                
+            halt_condition: integer. Goes with training mode 'halt'.
+                Specifies the number of observations required before 
+                halting early. A variable stop_idx is stored so that
+                Y[:,:stop_idx] built the model, and Y[:,stop_idx:] 
+                can be used in evaluating the model with the "predict" function.
+                Default: None
 
-        **kwargs:
-        debug: boolean. If True, a pdb.set_trace() is executed at the
-            top of the code. Default: False
-        verbosity: integer. If positive, updates are printed.
-            Default: 0
-    '''
-    import numpy as np
-    if kwargs.get('debug',False):
-        import pdb
-        pdb.set_trace()
-    #
-    verbosity = kwargs.get('verbosity',0)
+            **kwargs:
+            debug: boolean. If True, a pdb.set_trace() is executed at the
+                top of the code. Default: False
+            verbosity: integer. If positive, updates are printed.
+                Default: 0
+        '''
+        import numpy as np
+        if kwargs.get('debug',False):
+            import pdb
+            pdb.set_trace()
+        #
+        verbosity = kwargs.get('verbosity',0)
 
-    # Verify the user has set needed information depending on the mode.
-    assert mode.lower() in ['full', 'halt']
-    if mode=='halt':
-        assert isinstance(halt_condition, int)
+        # Verify the user has set needed information depending on the mode.
+        assert mode.lower() in ['full', 'halt']
+        if mode=='halt':
+            assert isinstance(halt_condition, int)
 
-    global _oDD     # storage for precomputed operator (D \otimes D)
-    global _mu      # current estimate for mean
-    global _mus     # the history of calculated means; non-essential.
-    if mode=='halt':
-        global stop_idx
+        #global _oDD     # storage for precomputed operator (D \otimes D)
+        #global _mu      # current estimate for mean
+        #global _mus     # the history of calculated means; non-essential.
+        #if mode=='halt':
+        #    global stop_idx
 
-    d,n = np.shape(Y)
+        d,n = np.shape(Y)
 
-    #anomalies = np.array(n, dtype=bool)
-    norms = np.zeros(n, dtype=float)
+        #anomalies = np.array(n, dtype=bool)
+        norms = np.zeros(n, dtype=float)
 
-    # track an estimate for the data mean, initialized with the
-    # first data point in Y.
-    _mu = np.array( Y[:,0] )
-    _mu.shape = (d,1)
-    _mus = [ _mu ]
+        # track an estimate for the data mean, initialized with the
+        # first data point in Y.
+        self._mu = np.array( Y[:,0] )
+        self._mu.shape = (d,1)
+        self._mus = [ self._mu ]
 
-    # The second vector in Y will be the first dictionary entry.
-    D = np.zeros( (d,1), dtype=float)
-    y1 = Y[:,1]
-    y1.shape = (d,1)
-    D = y1 - _mu
-    norms[0] = 0.
-    _oDD = otimes(D,D, op=op)
+        # The second vector in Y will be the first dictionary entry.
+        D = np.zeros( (d,1), dtype=float)
+        y1 = Y[:,1]
+        y1.shape = (d,1)
+        D = y1 - self._mu
+        norms[0] = 0.
+        self._oDD = self.otimes(D,D, op=op)
 
-    # main loop.
-    consec=0    # tracking consecutive indices without an update.
-    for j in range(2,n):
-        if verbosity>0: print('Iteration %s : '%str(j).zfill(5), end='')
+        # main loop.
+        consec=0    # tracking consecutive indices without an update.
+        for j in range(2,n):
+            if verbosity>0: print('Iteration %s : '%str(j).zfill(5), end='')
 
-        yorig = np.array( Y[:,j] )
-        yorig.shape = (d,1)
+            yorig = np.array( Y[:,j] )
+            yorig.shape = (d,1)
 
-        ycurr = np.array( Y[:,j] )
-        ycurr.shape = (d,1)
-        ycurr -= _mu
+            ycurr = np.array( Y[:,j] )
+            ycurr.shape = (d,1)
+            ycurr -= self._mu
 
-        w = op_W( D, ycurr )
+            w = self.op_W( D, ycurr )
 
-        ytil = np.dot(D, w)
+            ytil = np.dot(D, w)
 
-        rel_err = np.linalg.norm( ytil - ycurr )/np.linalg.norm( ycurr )
-        norms[j] = rel_err
+            rel_err = np.linalg.norm( ytil - ycurr )/np.linalg.norm( ycurr )
+            norms[j] = rel_err
 
-        if verbosity>0: print('relative error %.2e; '%rel_err, end='')
+            if verbosity>0: print('relative error %.2e; '%rel_err, end='')
 
-        if rel_err < thresh:
-            if verbosity>0: print('continuing.')
-            consec += 1
-            if mode=='halt':
-                if consec == halt_condition:
-                    if verbosity>0: 
-                        print('%i consecutive observations without model update; halting.'%consec)
-                    #
-                    stop_idx = j+1
-                    break
+            if rel_err < thresh:
+                if verbosity>0: print('continuing.')
+                consec += 1
+                if mode=='halt':
+                    if consec == halt_condition:
+                        if verbosity>0: 
+                            print('%i consecutive observations without model update; halting.'%consec)
+                        #
+                        self.stop_idx = j+1
+                        break
+                #
+                continue
+            else:
+                if verbosity>0: print('appending datapoint to memory.')
+                consec = 0
+                
+                D = np.hstack( (D, ycurr) )
+
+                # update the mean; store a history of previous values.
+                nc = len( self._mus ) +1
+                self._mu = ((nc-1.)*self._mu + yorig)/(nc)
+                self._mus.append( self._mu )
+
             #
-            continue
+        #
+
+        if output_norms:
+            # allow the user to play with thresholding
+            return norms[:j]
         else:
-            if verbosity>0: print('appending datapoint to memory.')
-            consec = 0
-            
-            D = np.hstack( (D, ycurr) )
-
-            # update the mean; store a history of previous values.
-            nc = len( _mus ) +1
-            _mu = ((nc-1.)*_mu + yorig)/(nc)
-            _mus.append( _mu )
-
+            # apply a thresholding to define anomalies.
+            return (norms[:j] >= thresh)
         #
     #
 
-    if output_norms:
-        # allow the user to play with thresholding
-        return norms[:j]
-    else:
-        # apply a thresholding to define anomalies.
-        return (norms[:j] >= thresh)
+    def fit(self, Y, op=otimes2_ij, **kwargs):
+        '''
+        Constructs a dictionary with a fixed dataset. 
+        No pruning of dictionary elements is done.
+        Mean centering is done with respect to the entire set of data Y. 
+        
+        DATA IS ASSUMED TO COME IN COLUMNS.
+        '''
+        import numpy as np
+        from scipy import linalg as spla
+        
+        if kwargs.get('debug',False):
+            import pdb
+            pdb.set_trace()
+        #
+        verbosity = kwargs.get('verbosity',0)
+        
+        #global _oDD             # storage for precomputed operator (D \otimes D)
+        #global _oDD_lufactors   # LU factorization for dictionary
+        #global _mu              # current estimate for mean
+        #global _D               # storage for dictionary (mean-centered by _mu)
+        
+        d,n = np.shape(Y)
+
+        self._mu = np.mean( Y, axis=1 )
+        self._mu.shape = (d,1)
+        
+        self._D = (Y.T - self._mu.T).T
+        
+        self._oDD = self.otimes(self._D, self._D, op=op)
+        self._oDD_lufactors = spla.lu_factor(self._oDD)
+        
+        return
     #
-#
 
-def fit(Y, op=otimes2_ij, **kwargs):
-    '''
-    Constructs a dictionary with a fixed dataset. 
-    No pruning of dictionary elements is done.
-    Mean centering is done with respect to the entire set of data Y. 
-    
-    DATA IS ASSUMED TO COME IN COLUMNS.
-    '''
-    import numpy as np
-    from scipy import linalg as spla
-    
-    if kwargs.get('debug',False):
-        import pdb
-        pdb.set_trace()
+    def predict(self, Y, op=otimes2_ij, **kwargs):
+        '''
+        Applied the built MSET model (via .fit()) to a new set of data. 
+        Returns the reconstructed data Yhat.
+        You must choose a threshold criteria to identify anomalies.
+        '''
+        import numpy as np
+        if kwargs.get('debug',False):
+            import pdb
+            pdb.set_trace()
+        #
+        verbosity = kwargs.get('verbosity',0)
+
+        #global _oDD     # storage for precomputed operator (D \otimes D)
+        #global _mu      # current estimate for mean
+        #global _D       # storage for dictionary (mean-centered by _mu)
+        
+        d,m = Y.shape
+        
+    #    Yhat = np.array([ np.dot(_D, op_W(_D, y)) for y in Y.T ]).T
+        Yhat = np.array( Y.T - self._mu.T ).T
+        for j in range(Yhat.shape[1]):
+            pred = np.dot(self._D, self.op_W(self._D, Yhat[:,j].flatten()))
+            pred.shape = (d,1)
+            Yhat[:,[j]] = pred + self._mu  #column assignment finnicky
+            if verbosity>0:
+                print('MSET predict: data point %i of %i.'%(j+1,Y.shape[1]))
+
+        
+        return Yhat
     #
-    verbosity = kwargs.get('verbosity',0)
-    
-    global _oDD             # storage for precomputed operator (D \otimes D)
-    global _oDD_lufactors   # LU factorization for dictionary
-    global _mu              # current estimate for mean
-    global _D               # storage for dictionary (mean-centered by _mu)
-    
-    d,n = np.shape(Y)
 
-    _mu = np.mean( Y, axis=1 )
-    _mu.shape = (d,1)
-    
-    _D = (Y.T - _mu.T).T
-    
-    _oDD = otimes(_D,_D, op=op)
-    _oDD_lufactors = spla.lu_factor(_oDD)
-    
-    return
-#
-
-def predict(Y, op=otimes2_ij, **kwargs):
-    '''
-    Applied the built MSET model (via .fit()) to a new set of data. 
-    Returns the reconstructed data Yhat.
-    You must choose a threshold criteria to identify anomalies.
-    '''
-    import numpy as np
-    if kwargs.get('debug',False):
-        import pdb
-        pdb.set_trace()
+    #########################
     #
-    verbosity = kwargs.get('verbosity',0)
-
-    global _oDD     # storage for precomputed operator (D \otimes D)
-    global _mu      # current estimate for mean
-    global _D       # storage for dictionary (mean-centered by _mu)
-    
-    d,m = Y.shape
-    
-#    Yhat = np.array([ np.dot(_D, op_W(_D, y)) for y in Y.T ]).T
-    Yhat = np.array( Y.T - _mu.T ).T
-    for j in range(Yhat.shape[1]):
-        pred = np.dot(_D, op_W(_D, Yhat[:,j].flatten()))
-        pred.shape = (d,1)
-        Yhat[:,[j]] = pred + _mu  #column assignment finnicky
-        if verbosity>0:
-            print('MSET predict: data point %i of %i.'%(j+1,Y.shape[1]))
-
-    
-    return Yhat
-#
-
-#########################
-#
-# whole gamut + visualization
-# Specifically for time-delayed embedding problems!
-#
-
-def visualize_mset(x,thresh,delay, verbosity=0):
-    '''
-    Applies the online MSET algorithm to a scalar time series x
-    (expected as a simple row vector/array) and specified
-    threshold and time delay parameters. (the embedded space
-    is always three dimensional here).
-    '''
-    import tde
-    import numpy as np
-    from matplotlib import pyplot
-
-    X = tde.tde(x, delay=delay)
-
-    norms = online_mset(X, output_norms=True, thresh=thresh, verbosity=verbosity)
-
-    #############################
+    # whole gamut + visualization
+    # Specifically for time-delayed embedding problems!
     #
-    # visualize
+
+    def visualize_mset(self, x,thresh,delay, verbosity=0):
+        '''
+        Applies the online MSET algorithm to a scalar time series x
+        (expected as a simple row vector/array) and specified
+        threshold and time delay parameters. (the embedded space
+        is always three dimensional here).
+        '''
+        import tde
+        import numpy as np
+        from matplotlib import pyplot
+
+        X = tde.tde(x, delay=delay)
+
+        norms = self.online_mset(X, output_norms=True, thresh=thresh, verbosity=verbosity)
+
+        #############################
+        #
+        # visualize
+        #
+        fig,ax = pyplot.subplots(3,1,
+                            figsize=(12,5),
+                            gridspec_kw={'height_ratios':[3,1,1]},
+                            sharex=True)
+
+        t = np.arange(len(x))
+
+        t_d = t[2*delay+1:]
+
+        ax[0].plot(t,x)
+        ax[1].scatter(t_d,norms, s=2)
+
+    #    ymin = 10**int(np.floor(min(np.log10(norms[norms!=0.]))))
+    #    ymin = max(10**-5,ymin)
+    #    ymax = 10**int(np.ceil(max(np.log10(norms[norms!=0.]))))
+
+    #    ax[1].set_yscale('log')
+        ymin,ymax = 0,0.2
+        ax[1].set_ylim([ymin,ymax])
+
+        yticks = [ymin,thresh,ymax]
+        ax[1].set_yticks( yticks )
+    #    ax[1].set_yticklabels([r'$10^{%i}$'%np.log10(val) for val in yticks])
+
+        ax[1].yaxis.grid()
+        gls = ax[1].get_ygridlines()
+        gls[1].set_color('r')
+
+        # get locations of anomalies.
+        anomalies = (norms>=thresh)
+        where = np.where(anomalies)[0]
+        where += 2*delay+1
+
+        anom_windowed = np.convolve(anomalies, np.ones(delay//2)/(delay/2.), mode='same')
+        ax[2].plot(t_d, anomalies, c='r')
+        ax2r = ax[2].twinx()
+
+        ax2r.plot(t_d, anom_windowed, c='k')
+
+        ax[0].scatter(t[where], x[where], c='r', marker='o', s=50, alpha=0.8, zorder=1000)
+
+        ax[0].set_title('timeseries (blue) with anomalies (red)', fontsize=16)
+        ax[1].set_title('normed error in MSET representation', fontsize=16)
+        ax[2].set_title('anomaly hits (red) and density (black)', fontsize=16)
+
+        for axi in ax: axi.xaxis.grid()
+
+        fig.tight_layout()
+
+    #    fig.show()
+        return fig,ax
     #
-    fig,ax = pyplot.subplots(3,1,
-                        figsize=(12,5),
-                        gridspec_kw={'height_ratios':[3,1,1]},
-                        sharex=True)
-
-    t = np.arange(len(x))
-
-    t_d = t[2*delay:]
-
-    ax[0].plot(t,x)
-    ax[1].scatter(t_d,norms, s=2)
-
-#    ymin = 10**int(np.floor(min(np.log10(norms[norms!=0.]))))
-#    ymin = max(10**-5,ymin)
-#    ymax = 10**int(np.ceil(max(np.log10(norms[norms!=0.]))))
-
-#    ax[1].set_yscale('log')
-    ymin,ymax = 0,0.2
-    ax[1].set_ylim([ymin,ymax])
-
-    yticks = [ymin,thresh,ymax]
-    ax[1].set_yticks( yticks )
-#    ax[1].set_yticklabels([r'$10^{%i}$'%np.log10(val) for val in yticks])
-
-    ax[1].yaxis.grid()
-    gls = ax[1].get_ygridlines()
-    gls[1].set_color('r')
-
-    # get locations of anomalies.
-    anomalies = (norms>=thresh)
-    where = np.where(anomalies)[0]
-    where += 2*delay
-
-    anom_windowed = np.convolve(anomalies, np.ones(delay//2)/(delay/2.), mode='same')
-    ax[2].plot(t_d, anomalies, c='r')
-    ax2r = ax[2].twinx()
-
-    ax2r.plot(t_d, anom_windowed, c='k')
-
-    ax[0].scatter(t[where], x[where], c='r', marker='o', s=50, alpha=0.8, zorder=1000)
-
-    ax[0].set_title('timeseries (blue) with anomalies (red)', fontsize=16)
-    ax[1].set_title('normed error in MSET representation', fontsize=16)
-    ax[2].set_title('anomaly hits (red) and density (black)', fontsize=16)
-
-    for axi in ax: axi.xaxis.grid()
-
-    fig.tight_layout()
-
-#    fig.show()
-    return fig,ax
 #

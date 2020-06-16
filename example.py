@@ -25,6 +25,7 @@ x += heavy*np.sin(t/2) + heavy*(-np.sin(t))
 # sufficient to get a numerical zero-autocorrelation time.
 delay = int((np.pi/2)/(t[1] - t[0]))
 
-fig,ax = mset.visualize_mset(x,thresh,delay, verbosity=1)
+ms = mset.MSET()
+fig,ax = ms.visualize_mset(x,thresh,delay, verbosity=1)
 fig.show()
 
