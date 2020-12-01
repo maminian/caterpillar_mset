@@ -21,6 +21,10 @@ Python packages:
 
 Getting started
 ---
+This is not designed to be installed with a package manager (no pip/conda/etc).
+Simply clone the repository where you wish and use the files `mset.py` and `tde.py` 
+as modules which you can import.
+
 The script `example.py` runs an example of the 
 online anomaly detection on the synthetic 
 time series shown at the top of this readme. 
